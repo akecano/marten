@@ -10,6 +10,7 @@ using Marten.Linq.LastModified;
 using Marten.Linq.MatchesSql;
 using Marten.Linq.Parsing;
 using Marten.Linq.Parsing.Methods;
+using Marten.Linq.QueryHandlers;
 using Marten.Linq.SoftDeletes;
 using Weasel.Postgresql.SqlGeneration;
 
@@ -126,7 +127,7 @@ public class LinqParsing: IReadOnlyLinqParsing
     {
         if (_methodParsing.TryFind(expression.Method.DeclaringType, out var byName))
         {
-            if (byName.TryFind(expression.Method.Name, out var p))
+            if (byName.TryFind(HandleContainsKey(expression), out var p))
             {
                 return p;
             }
@@ -134,11 +135,20 @@ public class LinqParsing: IReadOnlyLinqParsing
 
         byName ??= ImHashMap<string, IMethodCallParser>.Empty;
         var parser = determineMethodParser(expression);
-        byName = byName.AddOrUpdate(expression.Method.Name, parser);
+        byName = byName.AddOrUpdate(HandleContainsKey(expression), parser);
         _methodParsing = _methodParsing.AddOrUpdate(expression.Method.DeclaringType, byName);
 
         return parser;
     }
+
+    private string HandleContainsKey(MethodCallExpression expression)
+    {
+        if(expression.Method.Name != LinqConstants.CONTAINS)
+            return expression.Method.Name;
+
+        return $"{expression.Method.Name}-{expression.Arguments.Single().IsValueExpression()}";
+    }
+
 
     private IMethodCallParser determineMethodParser(MethodCallExpression expression)
     {
