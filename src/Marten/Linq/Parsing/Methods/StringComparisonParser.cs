@@ -43,7 +43,28 @@ internal abstract class StringComparisonParser: IMethodCallParser
             throw new BadLinqExpressionException("Could not extract string value from {0}.".ToFormat(expression), null);
         }
 
-        var stringOperator = GetOperator(expression);
+        var comparisonType = GetComparisonType(expression);
+
+        var stringOperator = comparisonType switch
+        {
+            ComparisonType.Exact => "=",
+            ComparisonType.Like => "LIKE",
+            ComparisonType.ILike => "ILIKE",
+            _ => throw new ArgumentOutOfRangeException()
+        };
+
+        locator = comparisonType switch
+        {
+            ComparisonType.Exact => $"lower({locator})",
+            _ => locator
+        };
+
+        var paramReplacementToken = comparisonType switch
+        {
+            ComparisonType.Exact => $"lower(?)",
+            _ => "?"
+        };
+
         var parameterValue = FormatValue(expression.Method, value.Value as string);
         var param = parameterValue == null
             ? new CommandParameter(DBNull.Value, NpgsqlDbType.Varchar)
@@ -52,12 +73,12 @@ internal abstract class StringComparisonParser: IMethodCallParser
         // Do not use escape char when using case insensitivity
         // this way backslash does not have special meaning and works as string literal
         var escapeChar = string.Empty;
-        if (stringOperator == "ILIKE")
+        if (comparisonType == ComparisonType.ILike)
         {
             escapeChar = " ESCAPE ''";
         }
 
-        return new CustomizableWhereFragment($"{locator} {stringOperator} ?{escapeChar}", "?", param);
+        return new CustomizableWhereFragment($"{locator} {stringOperator} {paramReplacementToken}{escapeChar}", "?", param);
     }
 
     protected bool AreMethodsEqual(MethodInfo method1, MethodInfo method2)
@@ -92,6 +113,28 @@ internal abstract class StringComparisonParser: IMethodCallParser
         }
 
         return false;
+    }
+
+    protected enum ComparisonType
+    {
+        Exact,
+        ILike,
+        Like
+    }
+
+    protected virtual ComparisonType GetComparisonType(MethodCallExpression expression)
+    {
+        var comparison = expression.Arguments.OfType<ConstantExpression>()
+            .Where(a => a.Type == typeof(StringComparison))
+            .Select(c => (StringComparison)c.Value)
+            .FirstOrDefault();
+
+        return comparison switch
+        {
+            StringComparison.CurrentCultureIgnoreCase or StringComparison.InvariantCultureIgnoreCase => ComparisonType.ILike,
+            StringComparison.OrdinalIgnoreCase => ComparisonType.Exact,
+            _ => ComparisonType.Like
+        };
     }
 
     /// <summary>
